@@ -1,94 +1,61 @@
 const express = require('express');
 const cors = require('cors');
-const app = express();
+const { MongoClient, ServerApiVersion } = require('mongodb');
 require('dotenv').config();
+
+const app = express();
 const port = process.env.PORT || 5000;
 
-// middleware
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// mongodb connect this place 
-
-const { MongoClient, ServerApiVersion } = require('mongodb');
-
-// const uri = "mongodb+srv://<db_username>:<db_password>@cluster0.hq6na.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+// MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.hq6na.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
-    serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
-    }
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
 });
 
-async function run() {
-    try {
-        // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+// Connect MongoDB and load routes
+async function connectDB() {
+  try {
+    await client.connect();
+    console.log("✅ Connected to MongoDB");
 
-        const database = client.db("workup");
-        const usersCollection = database.collection("users");
+    const db = client.db("workup");
 
-        // POST route এখানে যোগ করতে পারো
-        app.post('/api/users', async (req, res) => {
-            const userData = req.body;
+    // Collections
+    const usersCollection = db.collection("users");
+    const paymentsCollection = db.collection("payments");
+    const transactionsCollection = db.collection("transactions"); // নতুন কালেকশন
 
-            try {
-                const existingUser = await usersCollection.findOne({ email: userData.email });
-                if (existingUser) {
-                    return res.status(400).json({ message: 'এই ইমেইল ইতিমধ্যেই ব্যবহার করা হয়েছে' });
-                }
+    // Routes
+    const userRoutes = require('./routes/users')(usersCollection);
+    const paymentRoutes = require('./routes/payments')(paymentsCollection);
+    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection);
 
-                const result = await usersCollection.insertOne(userData);
-                res.status(201).json({
-                    message: 'User created successfully',
-                    insertedId: result.insertedId
-                });
-            } catch (err) {
-                console.error(err);
-                res.status(500).json({ message: 'Server error' });
-            }
-        });
+    app.use('/api/users', userRoutes);
+    app.use('/api/payment-methods', paymentRoutes);
+    app.use('/api/transactions', transactionRoutes); // নতুন রাউট
 
-        // get kora hoice
-
-        app.get("/api/users/email/:email", async (req, res) => {
-            const { email } = req.params;
-
-            try {
-                const database = client.db("workup");
-                const usersCollection = database.collection("users");
-
-                const user = await usersCollection.findOne({ email: email });
-                if (!user) return res.status(404).json({ message: "User not found" });
-
-                res.status(200).json(user);
-            } catch (err) {
-                console.error(err);
-                res.status(500).json({ message: "Server error" });
-            }
-        });
-        // এখানে কোড লিখতে হবে। 
-
-
-
-        // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
-    } finally {
-        // Ensures that the client will close when you finish/error
-        // await client.close();
-    }
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error);
+  }
 }
-run().catch(console.dir);
 
+connectDB();
+
+// Root Route
 app.get('/', (req, res) => {
-    res.send('My server is running')
-})
+  res.send('🚀 Server is running...');
+});
 
+// Start Server
 app.listen(port, () => {
-    console.log(`My server is running on port:${port}`)
-})
+  console.log(`Server is running on port: ${port}`);
+});
