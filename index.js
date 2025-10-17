@@ -33,16 +33,19 @@ async function connectDB() {
     const usersCollection = db.collection("users");
     const paymentsCollection = db.collection("payments");
     const transactionsCollection = db.collection("transactions"); // নতুন কালেকশন
-
+      const withdrawalsCollection = db.collection("withdrawals");
     // Routes
     const userRoutes = require('./routes/users')(usersCollection);
     const paymentRoutes = require('./routes/payments')(paymentsCollection);
     const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection);
+    const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
+
 
     app.use('/api/users', userRoutes);
     app.use('/api/payment-methods', paymentRoutes);
     app.use('/api/transactions', transactionRoutes); // নতুন রাউট
-
+    // app.use('/api/withdrawals', withdrawals);
+    app.use('/api/withdrawals', withdrawalRoutes);
   } catch (error) {
     console.error("❌ MongoDB connection error:", error);
   }
