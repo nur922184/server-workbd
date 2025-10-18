@@ -279,7 +279,7 @@ module.exports = (usersCollection, referralsCollection, transactionsCollection) 
                     currentLevel: currentLevel,
                     commissionLevels: commissionLevels,
                     referralCode: user?.referralCode,
-                    referralLink: `${process.env.FRONTEND_URL}/register?ref=${user?.referralCode}`
+                    referralLink: `https://work-up-bd-66b83.web.app/signup/?ref=${user?.referralCode}`
                 }
             });
 
