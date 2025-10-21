@@ -24,7 +24,7 @@ const client = new MongoClient(uri, {
 // Connect MongoDB and load routes
 async function connectDB() {
   try {
-    // await client.connect();
+    await client.connect();
     console.log("✅ Connected to MongoDB");
 
     const db = client.db("workup");
@@ -32,16 +32,16 @@ async function connectDB() {
     // Collections
     const usersCollection = db.collection("users");
     const paymentsCollection = db.collection("payments");
-    const transactionsCollection = db.collection("transactions"); // নতুন কালেকশন
+    const transactionsCollection = db.collection("transactions"); 
     const withdrawalsCollection = db.collection("withdrawals");
     const productsCollection = db.collection("products")
     const userProductsCollection = db.collection("user_products");
     const referralsCollection = db.collection("referrals");
 
     // Routes
-    const userRoutes = require('./routes/users')(usersCollection);
+    const userRoutes = require('./routes/users')(usersCollection, referralsCollection);
     const paymentRoutes = require('./routes/payments')(paymentsCollection);
-    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection);
+    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection, referralsCollection);
     const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
     const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection);
     const dailyIncomeRoutes = require('./routes/dailyIncome')(userProductsCollection, usersCollection);
@@ -49,7 +49,7 @@ async function connectDB() {
 
     app.use('/api/users', userRoutes);
     app.use('/api/payment-methods', paymentRoutes);
-    app.use('/api/transactions', transactionRoutes); // নতুন রাউট
+    app.use('/api/transactions', transactionRoutes); 
     app.use('/api/withdrawals', withdrawalRoutes);
     app.use('/api/products', productRoutes);
     app.use('/api/daily-income', dailyIncomeRoutes);
