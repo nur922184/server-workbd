@@ -1,147 +1,138 @@
-// routes/dailyIncome.js
+// routes/dailyIncome.js - Clean & Optimized Version
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const cron = require('node-cron');
 
-module.exports = (userProductsCollection, usersCollection) => {
-    
-    // দৈনিক আয় ডিস্ট্রিবিউট ফাংশন
-    const distributeDailyIncome = async () => {
+module.exports = (userProductsCollection, usersCollection, transactionsCollection) => {
+
+  /** 🔹 মূল ফাংশন: দৈনিক ইনকাম ডিস্ট্রিবিউশন */
+  const distributeDailyIncome = async () => {
+    console.log('🔹 Starting daily income distribution...');
+
+    try {
+      const activeProducts = await userProductsCollection.find({
+        status: 'active',
+        remainingDays: { $gt: 0 }
+      }).toArray();
+
+      console.log(`📊 Found ${activeProducts.length} active products for income distribution`);
+
+      let totalDistributed = 0, processed = 0;
+
+      for (const p of activeProducts) {
         try {
-            console.log('🔹 Starting daily income distribution...');
-            
-            // সকল active user products পাওয়া
-            const activeProducts = await userProductsCollection.find({
-                status: 'active',
-                remainingDays: { $gt: 0 }
-            }).toArray();
+          const user = await usersCollection.findOne({ _id: new ObjectId(p.userId) });
+          if (!user) {
+            console.warn(`⚠️ User not found for product ${p._id}`);
+            continue;
+          }
 
-            console.log(`📊 Found ${activeProducts.length} active products for income distribution`);
+          const income = p.dailyIncome;
+          const newRemaining = p.remainingDays - 1;
+          const newStatus = newRemaining <= 0 ? 'completed' : 'active';
 
-            let totalDistributed = 0;
-            let processedProducts = 0;
+          // 1️⃣ ব্যালান্স আপডেট
+          await usersCollection.updateOne(
+            { _id: new ObjectId(p.userId) },
+            { $inc: { balance: income } }
+          );
 
-            for (const product of activeProducts) {
-                try {
-                    // ইউজার পাওয়া
-                    const user = await usersCollection.findOne({ 
-                        _id: new ObjectId(product.userId) 
-                    });
-
-                    if (!user) {
-                        console.log(`❌ User not found for product: ${product._id}`);
-                        continue;
-                    }
-
-                    // দৈনিক আয় ক্যালকুলেট
-                    const dailyIncome = product.dailyIncome;
-                    
-                    // ইউজারের ব্যালেন্স আপডেট
-                    const newBalance = user.balance + dailyIncome;
-                    await usersCollection.updateOne(
-                        { _id: new ObjectId(product.userId) },
-                        { $set: { balance: newBalance } }
-                    );
-
-                    // প্রোডাক্ট আপডেট
-                    const newTotalEarned = product.totalEarned + dailyIncome;
-                    const newRemainingDays = product.remainingDays - 1;
-                    const newStatus = newRemainingDays === 0 ? 'completed' : 'active';
-
-                    await userProductsCollection.updateOne(
-                        { _id: new ObjectId(product._id) },
-                        { 
-                            $set: { 
-                                totalEarned: newTotalEarned,
-                                remainingDays: newRemainingDays,
-                                status: newStatus,
-                                lastPaymentDate: new Date()
-                            } 
-                        }
-                    );
-
-                    totalDistributed += dailyIncome;
-                    processedProducts++;
-
-                    console.log(`✅ Distributed ৳${dailyIncome} to ${user.email} for ${product.productName}`);
-
-                } catch (error) {
-                    console.error(`❌ Error processing product ${product._id}:`, error);
-                }
+          // 2️⃣ ইউজার প্রোডাক্ট আপডেট
+          await userProductsCollection.updateOne(
+            { _id: p._id },
+            {
+              $set: {
+                totalEarned: p.totalEarned + income,
+                remainingDays: newRemaining,
+                status: newStatus,
+                lastPaymentDate: new Date()
+              }
             }
+          );
 
-            console.log(`🎉 Daily income distribution completed!`);
-            console.log(`💰 Total distributed: ৳${totalDistributed}`);
-            console.log(`📦 Processed products: ${processedProducts}`);
+          // 3️⃣ ট্রানজ্যাকশন হিস্টোরি লগ (optional)
+          if (transactionsCollection) {
+            await transactionsCollection.insertOne({
+              userId: new ObjectId(p.userId),
+              type: 'daily_income',
+              amount: income,
+              productName: p.productName,
+              date: new Date(),
+              status: 'success'
+            });
+          }
 
-        } catch (error) {
-            console.error('❌ Daily income distribution error:', error);
+          console.log(`✅ ৳${income} credited to ${user.email} (${p.productName})`);
+          totalDistributed += income;
+          processed++;
+        } catch (err) {
+          console.error(`❌ Error processing product ${p._id}:`, err);
         }
-    };
+      }
 
-    // ক্রন জব সেটআপ (প্রতিদিন রাত ১২টায় চলবে)
-    cron.schedule('0 0 * * *', distributeDailyIncome, {
-        scheduled: true,
-        timezone: "Asia/Dhaka"
-    });
+      console.log(`🎉 Distribution complete → ${processed} processed, ৳${totalDistributed} distributed.`);
+      return { processed, totalDistributed };
 
-    console.log('✅ Daily income cron job scheduled (12:00 AM Bangladesh time)');
+    } catch (err) {
+      console.error('❌ Daily income distribution error:', err);
+      throw err;
+    }
+  };
 
-    // ম্যানুয়ালি দৈনিক আয় ডিস্ট্রিবিউট (এডমিনের জন্য)
-    router.post('/distribute', async (req, res) => {
-        try {
-            await distributeDailyIncome();
-            
-            res.json({
-                success: true,
-                message: 'দৈনিক আয় সফলভাবে ডিস্ট্রিবিউট হয়েছে'
-            });
+  /** 🕛 ক্রন জব: প্রতিদিন রাত ১২টায় চলবে (Asia/Dhaka টাইমজোনে) */
+  cron.schedule('0 0 * * *', async () => {
+    await distributeDailyIncome();
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Dhaka'
+  });
 
-        } catch (error) {
-            console.error('Manual distribution error:', error);
-            res.status(500).json({
-                success: false,
-                message: 'দৈনিক আয় ডিস্ট্রিবিউট করতে সমস্যা হয়েছে'
-            });
-        }
-    });
+  console.log('✅ Daily income cron job scheduled (12:00 AM Bangladesh time)');
 
-    // ইউজারের দৈনিক আয় হিস্ট্রি
-    router.get('/user/:userId', async (req, res) => {
-        try {
-            const { userId } = req.params;
+  /** 🔹 POST /distribute → ম্যানুয়াল ডিস্ট্রিবিউশন (এডমিন) */
+  router.post('/distribute', async (req, res) => {
+    try {
+      const { processed, totalDistributed } = await distributeDailyIncome();
+      res.json({
+        success: true,
+        message: `দৈনিক আয় সফলভাবে ডিস্ট্রিবিউট হয়েছে`,
+        data: { processed, totalDistributed }
+      });
+    } catch (err) {
+      console.error('Manual distribution error:', err);
+      res.status(500).json({ success: false, message: 'দৈনিক আয় ডিস্ট্রিবিউট করতে সমস্যা হয়েছে' });
+    }
+  });
 
-            const userProducts = await userProductsCollection
-                .find({ 
-                    userId: new ObjectId(userId),
-                    status: 'active'
-                })
-                .sort({ purchaseDate: -1 })
-                .toArray();
+  /** 🔹 GET /user/:userId → ইউজারের ইনকাম হিস্ট্রি */
+  router.get('/user/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      if (!ObjectId.isValid(userId))
+        return res.status(400).json({ success: false, message: 'Invalid user ID' });
 
-            const incomeData = userProducts.map(product => ({
-                productName: product.productName,
-                dailyIncome: product.dailyIncome,
-                totalEarned: product.totalEarned,
-                remainingDays: product.remainingDays,
-                purchaseDate: product.purchaseDate,
-                lastPaymentDate: product.lastPaymentDate
-            }));
+      const products = await userProductsCollection
+        .find({ userId: new ObjectId(userId) })
+        .sort({ purchaseDate: -1 })
+        .toArray();
 
-            res.json({
-                success: true,
-                data: incomeData
-            });
+      const data = products.map(p => ({
+        productName: p.productName,
+        dailyIncome: p.dailyIncome,
+        totalEarned: p.totalEarned,
+        remainingDays: p.remainingDays,
+        status: p.status,
+        purchaseDate: p.purchaseDate,
+        lastPaymentDate: p.lastPaymentDate
+      }));
 
-        } catch (error) {
-            console.error('Get user income error:', error);
-            res.status(500).json({
-                success: false,
-                message: 'আয় তথ্য লোড করতে সমস্যা হয়েছে'
-            });
-        }
-    });
+      res.json({ success: true, data });
+    } catch (err) {
+      console.error('Get user income error:', err);
+      res.status(500).json({ success: false, message: 'আয় তথ্য লোড করতে সমস্যা হয়েছে' });
+    }
+  });
 
-    return router;
+  return router;
 };
