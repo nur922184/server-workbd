@@ -32,7 +32,7 @@ async function connectDB() {
     // Collections
     const usersCollection = db.collection("users");
     const paymentsCollection = db.collection("payments");
-    const transactionsCollection = db.collection("transactions"); 
+    const transactionsCollection = db.collection("transactions");
     const withdrawalsCollection = db.collection("withdrawals");
     const productsCollection = db.collection("products")
     const userProductsCollection = db.collection("user_products");
@@ -45,11 +45,13 @@ async function connectDB() {
     const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
     const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection);
     const dailyIncomeRoutes = require('./routes/dailyIncome')(userProductsCollection, usersCollection);
-    const referralRoutes = require('./routes/referrals')(usersCollection, referralsCollection, transactionsCollection);
+
+    // ✅ FIXED: Pass MongoDB client as 4th argument
+    const referralRoutes = require('./routes/referrals')(usersCollection, referralsCollection, transactionsCollection, client);
 
     app.use('/api/users', userRoutes);
     app.use('/api/payment-methods', paymentRoutes);
-    app.use('/api/transactions', transactionRoutes); 
+    app.use('/api/transactions', transactionRoutes);
     app.use('/api/withdrawals', withdrawalRoutes);
     app.use('/api/products', productRoutes);
     app.use('/api/daily-income', dailyIncomeRoutes);

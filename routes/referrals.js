@@ -13,89 +13,49 @@ module.exports = (usersCollection, referralsCollection, transactionsCollection, 
     ];
 
     // রেফারেল রেজিস্ট্রেশন (সাইনআপে - শুধু রেকর্ড তৈরি)
-    router.post('/register', async (req, res) => {
-        const session = client.startSession();
+    router.post("/register", async (req, res) => {
+        const { userId, referrerCode, userEmail } = req.body;
 
+        const session = await client.startSession();
         try {
             await session.withTransaction(async () => {
-                const { userId, referrerCode, userEmail } = req.body;
 
-                if (!userId || !referrerCode || !userEmail) {
-                    throw new Error('MISSING_REQUIRED_FIELDS');
-                }
-
-                // রেফারার খুঁজে বের করুন
-                const referrer = await usersCollection.findOne({
-                    referralCode: referrerCode
-                }, { session });
-
+                // Referrer ইউজার খুঁজে বের করো
+                const referrer = await usersCollection.findOne({ referralCode: referrerCode });
                 if (!referrer) {
-                    throw new Error('INVALID_REFERRAL_CODE');
+                    throw new Error("INVALID_REFERRAL_CODE");
                 }
 
-                // ইতিমধ্যে রেফার্ড কিনা চেক করুন
-                const existingReferral = await referralsCollection.findOne({
-                    referredUserId: new ObjectId(userId)
-                }, { session });
-
-                if (existingReferral) {
-                    throw new Error('ALREADY_REFERRED');
-                }
-
-                // রেফারেল রেকর্ড তৈরি - status: 'pending'
-                const referralData = {
-                    referrerUserId: new ObjectId(referrer._id),
+                // নতুন referral ডকুমেন্ট তৈরি করো
+                const newReferral = {
+                    referrerId: referrer._id,
                     referrerEmail: referrer.email,
-                    referredUserId: new ObjectId(userId),
+                    referredUserId: userId,
                     referredEmail: userEmail,
-                    level: 1,
-                    commissionRate: commissionLevels[2].rate,
-                    status: 'pending', // ✅ নতুন: প্রথমে pending
-                    registrationDate: new Date(),
-                    totalEarned: 0,
-                    commissionHistory: [],
-                    hasDeposited: false, // ✅ নতুন: ডিপোজিট করা হয়নি
-                    depositApproved: false // ✅ নতুন: ডিপোজিট এপ্রুভ হয়নি
+                    status: "pending",
+                    createdAt: new Date(),
                 };
 
-                await referralsCollection.insertOne(referralData, { session });
+                // এখানে ডুপ্লিকেট চেক করার দরকার নেই
+                await referralsCollection.insertOne(newReferral, { session });
 
-                // শুধু রেফারেল কাউন্ট আপডেট (বোনাস না দিয়ে)
+                // রেফারারের totalReferrals বাড়াও
                 await usersCollection.updateOne(
-                    { _id: new ObjectId(referrer._id) },
+                    { _id: referrer._id },
                     { $inc: { totalReferrals: 1 } },
                     { session }
                 );
 
                 res.json({
                     success: true,
-                    message: 'রেফারেল সফলভাবে রেজিস্টার হয়েছে। ডিপোজিট এপ্রুভ হলে কমিশন পাবেন।',
-                    data: { referrerName: referrer.displayName }
+                    message: "Referral registered successfully",
                 });
             });
         } catch (error) {
-            console.error('Referral registration error:', error);
-
-            let message = 'রেফারেল রেজিস্ট্রেশনে সমস্যা হয়েছে';
-            let statusCode = 500;
-
-            if (error.message === 'MISSING_REQUIRED_FIELDS') {
-                message = 'ইউজার আইডি, ইমেইল এবং রেফারার কোড প্রয়োজন';
-                statusCode = 400;
-            } else if (error.message === 'INVALID_REFERRAL_CODE') {
-                message = 'ভুল রেফারেল কোড';
-                statusCode = 404;
-            } else if (error.message === 'ALREADY_REFERRED') {
-                message = 'ইতিমধ্যে রেফার্ড হয়েছেন';
-                statusCode = 400;
-            }
-
-            res.status(statusCode).json({
-                success: false,
-                message: message
-            });
+            console.error("Referral registration error:", error);
+            res.status(400).json({ success: false, message: error.message });
         } finally {
-            session.endSession();
+            await session.endSession();
         }
     });
 
