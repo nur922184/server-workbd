@@ -24,7 +24,7 @@ const client = new MongoClient(uri, {
 // Connect MongoDB and load routes
 async function connectDB() {
   try {
-    await client.connect();
+    // await client.connect();
     console.log("✅ Connected to MongoDB");
 
     const db = client.db("workup");
@@ -41,7 +41,7 @@ async function connectDB() {
     // Routes
     const userRoutes = require('./routes/users')(usersCollection, referralsCollection);
     const paymentRoutes = require('./routes/payments')(paymentsCollection);
-    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection, referralsCollection);
+    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection, userProductsCollection, referralsCollection);
     const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
     const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection);
     const dailyIncomeRoutes = require('./routes/dailyIncome')(userProductsCollection, usersCollection);

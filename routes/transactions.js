@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 
-module.exports = (transactionsCollection, usersCollection, referralsCollection) => {
+module.exports = (transactionsCollection, usersCollection,userProductsCollection, referralsCollection) => {
 
     /** ✅ Helper Function: রেফারেল বোনাস প্রসেসিং */
     const processReferralBonus = async (userId, depositAmount, transactionId) => {
