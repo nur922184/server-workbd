@@ -1,4 +1,4 @@
-// routes/products.js - Clean, Secure & Commented Version
+// routes/products.js - Modern, Secure & Commented Version
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
@@ -65,13 +65,15 @@ module.exports = (productsCollection, usersCollection, userProductsCollection) =
       if (purchased)
         return res.status(400).json({ success: false, message: 'আপনি ইতিমধ্যে এই প্রোডাক্টটি কিনেছেন' });
 
-      // ব্যালেন্স কমানো
-      await usersCollection.updateOne(
+      // ✅ ব্যালেন্স কমানো ও নতুন ব্যালেন্স পাওয়া
+      const updatedUser = await usersCollection.findOneAndUpdate(
         { _id: new ObjectId(userId) },
-        { $inc: { balance: -productPrice } }
+        { $inc: { balance: -productPrice } },
+        { returnDocument: 'after' }
       );
+      const newBalance = updatedUser.value?.balance || user.balance - productPrice;
 
-      // ইউজার প্রোডাক্ট সংরক্ষণ
+      // ✅ ইউজার প্রোডাক্ট সংরক্ষণ
       const userProductData = {
         userId: new ObjectId(userId),
         userEmail: user.email,
@@ -91,10 +93,15 @@ module.exports = (productsCollection, usersCollection, userProductsCollection) =
 
       const result = await userProductsCollection.insertOne(userProductData);
 
+      // ✅ রেসপন্সে newBalance পাঠানো
       res.json({
         success: true,
         message: 'প্রোডাক্ট সফলভাবে কেনা হয়েছে!',
-        data: { _id: result.insertedId, ...userProductData }
+        data: { 
+          _id: result.insertedId, 
+          ...userProductData,
+          newBalance
+        }
       });
     } catch (error) {
       console.error('Purchase error:', error);
