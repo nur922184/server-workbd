@@ -43,11 +43,11 @@ async function connectDB() {
     const paymentRoutes = require('./routes/payments')(paymentsCollection);
     const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection, userProductsCollection, referralsCollection);
     const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
-    const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection);
+    const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection, transactionsCollection, referralsCollection,);
     const dailyIncomeRoutes = require('./routes/dailyIncome')(userProductsCollection, usersCollection);
 
     // ✅ FIXED: Pass MongoDB client as 4th argument
-    const referralRoutes = require('./routes/referrals')(usersCollection, referralsCollection, transactionsCollection, client);
+    const referralRoutes = require('./routes/referrals')(usersCollection, referralsCollection, productsCollection, transactionsCollection, userProductsCollection, client);
 
     app.use('/api/users', userRoutes);
     app.use('/api/payment-methods', paymentRoutes);

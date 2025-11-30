@@ -40,6 +40,7 @@ module.exports = function (usersCollection, referralsCollection) {
         createdAt: new Date(),
         updatedAt: new Date(),
         referredBy: userData.referredBy || null,
+        bonusHistory: [] // Bonanza বোনাস হিস্ট্রি যোগ করুন
       };
 
       const result = await usersCollection.insertOne(completeUserData);
@@ -79,6 +80,79 @@ module.exports = function (usersCollection, referralsCollection) {
     }
   });
 
+  // ✅ POST - Bonanza বোনাস যোগ করুন
+  router.post('/add-bonus', async (req, res) => {
+    try {
+      const { userId, amount, type = 'bonanza_bonus', description = 'Bonanza প্রোডাক্ট বোনাস' } = req.body;
+
+      if (!userId || !amount) {
+        return res.status(400).json({ success: false, message: 'User ID এবং Amount প্রয়োজন' });
+      }
+
+      if (!ObjectId.isValid(userId)) {
+        return res.status(400).json({ success: false, message: 'Invalid user ID' });
+      }
+
+      // ইউজারের ব্যালেন্স আপডেট করুন
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(userId) },
+        { 
+          $inc: { balance: parseFloat(amount) },
+          $push: {
+            bonusHistory: {
+              amount: parseFloat(amount),
+              type: type,
+              description: description,
+              date: new Date(),
+              status: 'completed'
+            }
+          }
+        }
+      );
+
+      if (result.modifiedCount === 0) {
+        return res.status(404).json({ success: false, message: 'ইউজার পাওয়া যায়নি' });
+      }
+
+      // আপডেট করা ইউজার ডাটা ফেরত দিন
+      const updatedUser = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+      res.json({
+        success: true,
+        message: `৳${amount} বোনাস সফলভাবে যোগ করা হয়েছে`,
+        data: {
+          newBalance: updatedUser.balance,
+          bonusAmount: amount
+        }
+      });
+
+    } catch (error) {
+      console.error('Add bonus error:', error);
+      res.status(500).json({ success: false, message: 'বোনাস যোগ করতে সমস্যা হয়েছে' });
+    }
+  });
+
+  // ✅ GET - ইউজারের বোনাস হিস্ট্রি
+  router.get('/:id/bonus-history', async (req, res) => {
+    try {
+      const user = await usersCollection.findOne({ _id: new ObjectId(req.params.id) });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+      const bonusHistory = user.bonusHistory || [];
+      
+      res.status(200).json({
+        success: true,
+        data: {
+          totalBonuses: bonusHistory.length,
+          totalBonusAmount: bonusHistory.reduce((sum, bonus) => sum + bonus.amount, 0),
+          bonusHistory: bonusHistory.sort((a, b) => new Date(b.date) - new Date(a.date))
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  });
+
   // ✅ PATCH - ডিপোজিট এপ্রুভ হলে রেফারেল বোনাস প্রসেস
   router.patch('/:id/process-referral-bonus', async (req, res) => {
     const { id } = req.params;
@@ -109,10 +183,20 @@ module.exports = function (usersCollection, referralsCollection) {
         }
       );
 
+      // রেফারারকে ৬০ টাকা বোনাস দিন
       await usersCollection.updateOne(
         { _id: referral.referrerUserId },
         {
           $inc: { balance: 60, totalCommission: 60, referralEarnings: 60 },
+          $push: {
+            bonusHistory: {
+              amount: 60,
+              type: 'referral_bonus',
+              description: 'রেফারেল ডিপোজিট বোনাস',
+              date: new Date(),
+              status: 'completed'
+            }
+          },
           $set: { updatedAt: new Date() },
         }
       );
