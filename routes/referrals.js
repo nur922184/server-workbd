@@ -170,63 +170,85 @@ module.exports = (usersCollection, referralsCollection, transactionsCollection, 
         };
     };
 
-    // রেফারেল রেজিস্ট্রেশন
-    router.post("/register", async (req, res) => {
-        const { userId, referrerCode, userEmail, displayName } = req.body;
-        const session = client.startSession();
-        
-        try {
-            await session.withTransaction(async () => {
-                const referrer = await usersCollection.findOne({ referralCode: referrerCode });
-                if (!referrer) throw new Error("INVALID_REFERRAL_CODE");
-
-                // চেক করুন যদি আগে থেকেই রেফারেল exists
-                const existingReferral = await referralsCollection.findOne({
-                    referredUserId: new ObjectId(userId)
-                });
-
-                if (existingReferral) {
-                    throw new Error("USER_ALREADY_REFERRED");
-                }
-
-                await referralsCollection.insertOne({
-                    referrerUserId: referrer._id,
-                    referrerEmail: referrer.email,
-                    referredUserId: new ObjectId(userId),
-                    referredEmail: userEmail,
-                    displayName: displayName,
-                    status: "pending",
-                    registrationDate: new Date(),
-                    totalEarned: 0,
-                    commissionHistory: []
-                }, { session });
-
-                await usersCollection.updateOne(
-                    { _id: referrer._id }, 
-                    { $inc: { totalReferrals: 1 } }, 
-                    { session }
-                );
-
-                res.json({ 
-                    success: true, 
-                    message: "রেফারেল সফলভাবে রেজিস্টার্ড হয়েছে" 
-                });
-            });
-        } catch (error) {
-            console.error('রেফারেল রেজিস্ট্রেশন error:', error);
-            res.status(400).json({ 
-                success: false, 
-                message: error.message === "INVALID_REFERRAL_CODE" 
-                    ? "ইনভ্যালিড রেফারেল কোড" 
-                    : error.message === "USER_ALREADY_REFERRED"
-                    ? "ইউজার ইতিমধ্যেই রেফার্ড হয়েছে"
-                    : "রেফারেল রেজিস্ট্রেশনে সমস্যা হয়েছে"
-            });
-        } finally { 
-            await session.endSession(); 
-        }
+ // রেফারেল রেজিস্ট্রেশন
+router.post("/register", async (req, res) => {
+  const { userId, referrerCode, userEmail, displayName } = req.body;
+  
+  // ভ্যালিডেশন
+  if (!userId || !referrerCode || !userEmail) {
+    return res.status(400).json({
+      success: false,
+      message: "আবশ্যক ফিল্ড গুলো পূরণ করুন"
     });
+  }
 
+  const session = client.startSession();
+  
+  try {
+    await session.withTransaction(async () => {
+      const referrer = await usersCollection.findOne({ referralCode: referrerCode });
+      if (!referrer) throw new Error("INVALID_REFERRAL_CODE");
+
+      // ইউজার নিজেকে রেফার করতে পারবে না
+      if (referrer.email === userEmail) {
+        throw new Error("SELF_REFERRAL_NOT_ALLOWED");
+      }
+
+      // চেক করুন যদি আগে থেকেই রেফারেল exists
+      const existingReferral = await referralsCollection.findOne({
+        referredUserId: new ObjectId(userId)
+      });
+
+      if (existingReferral) {
+        throw new Error("USER_ALREADY_REFERRED");
+      }
+
+      await referralsCollection.insertOne({
+        referrerUserId: referrer._id,
+        referrerEmail: referrer.email,
+        referredUserId: new ObjectId(userId),
+        referredEmail: userEmail,
+        displayName: displayName,
+        status: "pending",
+        registrationDate: new Date(),
+        totalEarned: 0,
+        commissionHistory: []
+      }, { session });
+
+      await usersCollection.updateOne(
+        { _id: referrer._id }, 
+        { $inc: { totalReferrals: 1 } }, 
+        { session }
+      );
+
+      res.json({ 
+        success: true, 
+        message: "রেফারেল সফলভাবে রেজিস্টার্ড হয়েছে" 
+      });
+    });
+  } catch (error) {
+    console.error('রেফারেল রেজিস্ট্রেশন error:', error);
+    
+    let errorMessage = "রেফারেল রেজিস্ট্রেশনে সমস্যা হয়েছে";
+    let statusCode = 400;
+
+    if (error.message === "INVALID_REFERRAL_CODE") {
+      errorMessage = "ইনভ্যালিড রেফারেল কোড";
+    } else if (error.message === "USER_ALREADY_REFERRED") {
+      errorMessage = "ইউজার ইতিমধ্যেই রেফার্ড হয়েছে";
+      statusCode = 409; // Conflict status code
+    } else if (error.message === "SELF_REFERRAL_NOT_ALLOWED") {
+      errorMessage = "আপনি নিজেকে রেফার করতে পারবেন না";
+    }
+
+    res.status(statusCode).json({ 
+      success: false, 
+      message: errorMessage
+    });
+  } finally { 
+    await session.endSession(); 
+  }
+});
     // প্রোডাক্ট ক্রয়ে কমিশন
     router.post('/on-product-purchase', async (req, res) => {
         const { userId, productId, amount, transactionId } = req.body;

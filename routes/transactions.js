@@ -1,24 +1,96 @@
-// routes/transactions.js - Clean & Simplified Version with Referral Bonus System
 const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 
-module.exports = (transactionsCollection, usersCollection,userProductsCollection, referralsCollection) => {
+module.exports = (transactionsCollection, usersCollection, userProductsCollection, referralsCollection) => {
 
-    /** ✅ Helper Function: রেফারেল বোনাস প্রসেসিং */
-    const processReferralBonus = async (userId, depositAmount, transactionId) => {
+    /** ✅ Helper Function: পার্সেন্টেজ-ভিত্তিক মাল্টি-লেভেল রেফারেল বোনাস */
+    const processPercentageReferralBonus = async (userId, depositAmount, transactionId) => {
         try {
-            const referral = await referralsCollection.findOne({
+            const bonusResults = [];
+
+            // লেভেল অনুসারে পার্সেন্টেজ কমিশন রেটস
+            const levelCommissionRates = {
+                1: 25,  // লেভেল 1: 10%
+                2: 3,   // লেভেল 2: 5%  
+                3: 2    // লেভেল 3: 2%
+            };
+
+            // বর্তমান ইউজার খুঁজে বের করা
+            const currentUser = await usersCollection.findOne({ _id: new ObjectId(userId) });
+            if (!currentUser) {
+                return { success: false, message: 'User not found' };
+            }
+
+            // লেভেল 1 রেফারেল খুঁজে বের করা
+            const level1Referral = await referralsCollection.findOne({
                 referredUserId: new ObjectId(userId),
                 status: 'pending',
                 hasDeposited: false
             });
 
-            if (!referral) return { success: false, message: 'No pending referral found' };
+            if (!level1Referral) {
+                return {
+                    success: true,
+                    message: 'No direct referral found for bonus',
+                    data: { bonuses: [] }
+                };
+            }
 
-            // রেফারেল আপডেট
+            // লেভেল 1 বোনাস প্রসেস (10%)
+            const level1Bonus = Math.round(depositAmount * levelCommissionRates[1] / 100);
+            await processSingleLevelBonus(level1Referral, 1, level1Bonus, depositAmount, transactionId, levelCommissionRates[1]);
+            bonusResults.push({
+                level: 1,
+                referrerId: level1Referral.referrerUserId,
+                referrerEmail: level1Referral.referrerEmail,
+                bonusAmount: level1Bonus,
+                commissionRate: levelCommissionRates[1],
+                relationship: 'direct'
+            });
+
+            // লেভেল 2 রেফারেল খুঁজে বের করা
+            const level2Referral = await referralsCollection.findOne({
+                referredUserId: level1Referral.referrerUserId,
+                status: 'active'
+            });
+
+            if (level2Referral && level2Referral.hasDeposited) {
+                const level2Bonus = Math.round(depositAmount * levelCommissionRates[2] / 100);
+                await processSingleLevelBonus(level2Referral, 2, level2Bonus, depositAmount, transactionId, levelCommissionRates[2]);
+                bonusResults.push({
+                    level: 2,
+                    referrerId: level2Referral.referrerUserId,
+                    referrerEmail: level2Referral.referrerEmail,
+                    bonusAmount: level2Bonus,
+                    commissionRate: levelCommissionRates[2],
+                    relationship: 'level-2'
+                });
+
+                // লেভেল 3 রেফারেল খুঁজে বের করা
+                const level3Referral = await referralsCollection.findOne({
+                    referredUserId: level2Referral.referrerUserId,
+                    status: 'active',
+                    hasDeposited: true
+                });
+
+                if (level3Referral) {
+                    const level3Bonus = Math.round(depositAmount * levelCommissionRates[3] / 100);
+                    await processSingleLevelBonus(level3Referral, 3, level3Bonus, depositAmount, transactionId, levelCommissionRates[3]);
+                    bonusResults.push({
+                        level: 3,
+                        referrerId: level3Referral.referrerUserId,
+                        referrerEmail: level3Referral.referrerEmail,
+                        bonusAmount: level3Bonus,
+                        commissionRate: levelCommissionRates[3],
+                        relationship: 'level-3'
+                    });
+                }
+            }
+
+            // মূল রেফারেল আপডেট করা
             await referralsCollection.updateOne(
-                { _id: referral._id },
+                { _id: level1Referral._id },
                 {
                     $set: {
                         status: 'active',
@@ -30,134 +102,88 @@ module.exports = (transactionsCollection, usersCollection,userProductsCollection
                 }
             );
 
-            // রেফারারকে বোনাস প্রদান (৬০ টাকা)
-            const bonusAmount = 60;
-            await usersCollection.updateOne(
-                { _id: referral.referrerUserId },
-                {
-                    $inc: {
-                        balance: bonusAmount,
-                        totalCommission: bonusAmount,
-                        referralEarnings: bonusAmount
-                    }
-                }
-            );
-
-            // বোনাস ট্রানজেকশন রেকর্ড
-            await transactionsCollection.insertOne({
-                userId: referral.referrerUserId,
-                userEmail: referral.referrerEmail,
-                userName: 'Referral Bonus',
-                amount: bonusAmount,
-                type: 'referral_bonus',
-                description: `রেফারেল ডিপোজিট বোনাস - ${referral.referredEmail}`,
-                status: 'completed',
-                date: new Date(),
-                referralId: referral._id,
-                fromDepositAmount: depositAmount,
-                fromTransactionId: transactionId
-            });
-
-            // রেফারেলের কমিশন হিস্ট্রি সংরক্ষণ
-            await referralsCollection.updateOne(
-                { _id: referral._id },
-                {
-                    $inc: { totalEarned: bonusAmount },
-                    $push: {
-                        commissionHistory: {
-                            type: 'deposit_bonus',
-                            amount: bonusAmount,
-                            depositAmount,
-                            date: new Date(),
-                            status: 'completed',
-                            transactionId: new ObjectId(transactionId)
-                        }
-                    }
-                }
-            );
-
             return {
                 success: true,
-                message: 'Referral bonus processed successfully',
+                message: `Percentage-based referral bonus processed successfully. ${bonusResults.length} levels paid`,
                 data: {
-                    referrerId: referral.referrerUserId,
-                    referrerEmail: referral.referrerEmail,
-                    bonusAmount
+                    bonuses: bonusResults,
+                    totalBonus: bonusResults.reduce((sum, bonus) => sum + bonus.bonusAmount, 0)
                 }
             };
+
         } catch (error) {
-            console.error('Referral bonus error:', error);
-            return { success: false, message: 'Referral bonus processing failed' };
+            console.error('Percentage referral bonus error:', error);
+            return { success: false, message: 'Percentage referral bonus processing failed' };
         }
     };
-    router.post('/daily-income-update', async (req, res) => {
-        try {
-            const today = new Date();
-            const activeProducts = await userProductsCollection.find({
-                status: 'active',
-                remainingDays: { $gt: 0 }
-            }).toArray();
 
-            if (activeProducts.length === 0)
-                return res.json({ success: true, message: 'আজকে কোনো ইনকাম আপডেটের প্রয়োজন নেই' });
 
-            let updatedCount = 0;
 
-            for (const item of activeProducts) {
-                const { _id, userId, dailyIncome, remainingDays, totalEarned } = item;
-
-                // 1️⃣ ইউজার ব্যালান্সে ইনকাম যোগ করা
-                await usersCollection.updateOne(
-                    { _id: new ObjectId(userId) },
-                    { $inc: { balance: dailyIncome } }
-                );
-
-                // 2️⃣ ইউজার প্রোডাক্ট আপডেট করা
-                const newRemainingDays = remainingDays - 1;
-                await userProductsCollection.updateOne(
-                    { _id: _id },
-                    {
-                        $set: {
-                            remainingDays: newRemainingDays,
-                            lastPaymentDate: today,
-                            totalEarned: totalEarned + dailyIncome,
-                            status: newRemainingDays <= 0 ? 'completed' : 'active'
-                        }
-                    }
-                );
-
-                // 3️⃣ ট্রানজ্যাকশন হিস্টোরিতে যোগ করা
-                await transactionsCollection.insertOne({
-                    userId: new ObjectId(userId),
-                    type: 'daily_income',
-                    amount: dailyIncome,
-                    description: `Daily income credited from product ${item.productName}`,
-                    date: today,
-                    status: 'success'
-                });
-
-                updatedCount++;
+    /** ✅ Helper Function: সিঙ্গেল লেভেল বোনাস প্রসেস */
+    const processSingleLevelBonus = async (referral, level, bonusAmount, depositAmount, transactionId, commissionRate) => {
+        // রেফারারকে বোনাস প্রদান
+        await usersCollection.updateOne(
+            { _id: referral.referrerUserId },
+            {
+                $inc: {
+                    balance: bonusAmount,
+                    totalCommission: bonusAmount,
+                    referralEarnings: bonusAmount,
+                    [`level${level}Earnings`]: bonusAmount,
+                    totalReferralBonus: bonusAmount
+                }
             }
+        );
 
-            res.json({
-                success: true,
-                message: `✅ ${updatedCount}টি ইউজারের ডেইলি ইনকাম সফলভাবে আপডেট হয়েছে`,
-                date: today
-            });
+        // বোনাস ট্রানজেকশন রেকর্ড
+        await transactionsCollection.insertOne({
+            userId: referral.referrerUserId,
+            userEmail: referral.referrerEmail,
+            userName: `Level ${level} Referral Bonus`,
+            amount: bonusAmount,
+            type: 'referral_bonus',
+            description: `লেভেল ${level} রেফারেল বোনাস - ${commissionRate}% of ৳${depositAmount}`,
+            status: 'completed',
+            date: new Date(),
+            referralId: referral._id,
+            level: level,
+            commissionRate: commissionRate,
+            fromDepositAmount: depositAmount,
+            fromTransactionId: transactionId
+        });
 
-        } catch (error) {
-            console.error('Daily income update error:', error);
-            res.status(500).json({
-                success: false,
-                message: 'ডেইলি ইনকাম আপডেট করতে সমস্যা হয়েছে'
-            });
-        }
-    });
+        // রেফারেলের কমিশন হিস্ট্রি সংরক্ষণ
+        await referralsCollection.updateOne(
+            { _id: referral._id },
+            {
+                $inc: {
+                    totalEarned: bonusAmount,
+                    [`level${level}Commission`]: bonusAmount
+                },
+                $push: {
+                    commissionHistory: {
+                        type: `level_${level}_percentage_bonus`,
+                        amount: bonusAmount,
+                        level: level,
+                        commissionRate: commissionRate,
+                        depositAmount: depositAmount,
+                        date: new Date(),
+                        status: 'completed',
+                        transactionId: new ObjectId(transactionId)
+                    }
+                }
+            }
+        );
+    };
+
+    // routes/transactions.js - Deposit রাউট নিশ্চিত করুন
+
     /** ✅ POST /deposit → নতুন ডিপোজিট রিকোয়েস্ট */
     router.post('/deposit', async (req, res) => {
         try {
             const { userId, userEmail, userName, amount, transactionId, paymentMethod, paymentNumber } = req.body;
 
+            // ভ্যালিডেশন
             if (!userId || !amount || !transactionId || !paymentMethod) {
                 return res.status(400).json({ success: false, message: 'সবগুলো ফিল্ড পূরণ করুন' });
             }
@@ -165,13 +191,14 @@ module.exports = (transactionsCollection, usersCollection,userProductsCollection
                 return res.status(400).json({ success: false, message: 'টাকার পরিমাণ সঠিক নয়' });
             }
 
+            // ডুপ্লিকেট ট্রানজেকশন চেক
             const exists = await transactionsCollection.findOne({ transactionId });
             if (exists) {
                 return res.status(400).json({ success: false, message: 'এই ট্রানজেকশন আইডি ইতিমধ্যে ব্যবহার হয়েছে' });
             }
 
             const newTransaction = {
-                userId,
+                userId: new ObjectId(userId),
                 userEmail,
                 userName,
                 amount: parseFloat(amount),
@@ -186,14 +213,23 @@ module.exports = (transactionsCollection, usersCollection,userProductsCollection
             };
 
             const result = await transactionsCollection.insertOne(newTransaction);
-            res.json({ success: true, message: 'ট্রানজেকশন সাবমিট হয়েছে', data: { _id: result.insertedId, ...newTransaction } });
+
+            res.json({
+                success: true,
+                message: 'ট্রানজেকশন সাবমিট হয়েছে',
+                data: {
+                    _id: result.insertedId,
+                    ...newTransaction
+                }
+            });
+
         } catch (error) {
             console.error('Deposit error:', error);
             res.status(500).json({ success: false, message: 'সার্ভার ত্রুটি হয়েছে' });
         }
     });
 
-    /** ✅ PATCH /:id/status → ট্রানজেকশন এপ্রুভ/রিজেক্ট (এডমিনের জন্য) */
+    /** ✅ PATCH /:id/status → ট্রানজেকশন এপ্রুভ/রিজেক্ট */
     router.patch('/:id/status', async (req, res) => {
         try {
             const { id } = req.params;
@@ -215,8 +251,12 @@ module.exports = (transactionsCollection, usersCollection,userProductsCollection
                     { $inc: { balance: transaction.amount } }
                 );
 
-                // রেফারেল বোনাস প্রসেস (যদি প্রযোজ্য)
-                referralBonusResult = await processReferralBonus(transaction.userId, transaction.amount, id);
+                // পার্সেন্টেজ-ভিত্তিক রেফারেল বোনাস প্রসেস
+                referralBonusResult = await processPercentageReferralBonus(
+                    transaction.userId,
+                    transaction.amount,
+                    id
+                );
             }
 
             await transactionsCollection.updateOne(
@@ -230,11 +270,19 @@ module.exports = (transactionsCollection, usersCollection,userProductsCollection
                 }
             );
 
+            // বোনাস স্ট্যাটাস মেসেজ তৈরি
+            let bonusMessage = '';
+            if (referralBonusResult?.success && referralBonusResult.data?.bonuses?.length > 0) {
+                const bonusDetails = referralBonusResult.data.bonuses.map(bonus =>
+                    `লেভেল ${bonus.level}: ${bonus.commissionRate}% = ৳${bonus.bonusAmount}`
+                ).join(', ');
+
+                bonusMessage = ` এবং ${referralBonusResult.data.bonuses.length} লেভেলে মোট ৳${referralBonusResult.data.totalBonus} বোনাস প্রদান করা হয়েছে (${bonusDetails})`;
+            }
+
             res.json({
                 success: true,
-                message:
-                    `ট্রানজেকশন ${status} হয়েছে` +
-                    (referralBonusResult?.success ? ' এবং রেফারেল বোনাস (৬০৳) প্রদান করা হয়েছে' : ''),
+                message: `ট্রানজেকশন ${status} হয়েছে${bonusMessage}`,
                 data: { referralBonus: referralBonusResult }
             });
         } catch (error) {

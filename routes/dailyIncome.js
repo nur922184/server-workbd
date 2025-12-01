@@ -13,12 +13,12 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
   const distributeDailyIncome = async () => {
     // ✅ লক চেক - যদি ইতিমধ্যে রান করছে তবে স্কিপ করুন
     if (isRunning) {
-      console.log('⏸️ Daily income distribution is already running, skipping...');
+      // console.log('⏸️ Daily income distribution is already running, skipping...');
       return { processed: 0, skipped: 0, totalDistributed: 0, reason: 'already_running' };
     }
 
     isRunning = true;
-    console.log('🔹 Starting daily income distribution (24 hours check)...');
+    // console.log('🔹 Starting daily income distribution (24 hours check)...');
 
     try {
       const activeProducts = await userProductsCollection.find({
@@ -26,7 +26,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
         remainingDays: { $gt: 0 }
       }).toArray();
 
-      console.log(`📊 Found ${activeProducts.length} active products for income distribution`);
+      // console.log(`📊 Found ${activeProducts.length} active products for income distribution`);
 
       let totalDistributed = 0, processed = 0, skipped = 0;
 
@@ -39,11 +39,11 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
           const timeDiff = now.getTime() - lastPaymentDate.getTime();
           const hoursDiff = timeDiff / (1000 * 60 * 60);
 
-          console.log(`⏰ Product: ${p.productName}, Hours since last payment: ${Math.round(hoursDiff)}`);
+          // console.log(`⏰ Product: ${p.productName}, Hours since last payment: ${Math.round(hoursDiff)}`);
 
           // ✅ 24 ঘন্টা পার হয়নি হলে স্কিপ করুন
           if (hoursDiff < 24) {
-            console.log(`⏳ Skipping ${p.productName} - 24 hours not passed yet (${Math.round(hoursDiff)} hours)`);
+            // console.log(`⏳ Skipping ${p.productName} - 24 hours not passed yet (${Math.round(hoursDiff)} hours)`);
             skipped++;
             continue;
           }
@@ -60,7 +60,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
             });
 
             if (existingPayment) {
-              console.log(`⏭️ Already paid today for ${p.productName}, skipping...`);
+              // console.log(`⏭️ Already paid today for ${p.productName}, skipping...`);
               skipped++;
               continue;
             }
@@ -84,7 +84,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
 
           // 2️⃣ ইউজার প্রোডাক্ট আপডেট - কমপ্লিট প্রোডাক্ট হ্যান্ডলিং
           if (newRemaining <= 0) {
-            console.log(`🎯 Product ${p.productName} completed! Total days: ${p.totalDays}`);
+            // console.log(`🎯 Product ${p.productName} completed! Total days: ${p.totalDays}`);
 
             await userProductsCollection.updateOne(
               { _id: p._id },
@@ -133,7 +133,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
             });
           }
 
-          console.log(`✅ ৳${income} credited to ${user.email} (${p.productName}) - ${newRemaining} days remaining`);
+          // console.log(`✅ ৳${income} credited to ${user.email} (${p.productName}) - ${newRemaining} days remaining`);
           totalDistributed += income;
           processed++;
 
@@ -156,7 +156,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
         }
       }
 
-      console.log(`🎉 Distribution complete → ${processed} processed, ${skipped} skipped, ৳${totalDistributed} distributed.`);
+      // console.log(`🎉 Distribution complete → ${processed} processed, ${skipped} skipped, ৳${totalDistributed} distributed.`);
       return { processed, skipped, totalDistributed };
 
     } catch (err) {
@@ -264,7 +264,7 @@ module.exports = (userProductsCollection, usersCollection, transactionsCollectio
   // ✅ ম্যানুয়ালি টেস্ট করতে এই API কল করুন
   router.post('/test-distribution', async (req, res) => {
     try {
-      console.log('🧪 Test distribution started...');
+      // console.log('🧪 Test distribution started...');
 
       const activeProducts = await userProductsCollection.find({
         status: 'active',
