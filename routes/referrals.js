@@ -171,6 +171,7 @@ module.exports = (usersCollection, referralsCollection, transactionsCollection, 
     };
 
  // রেফারেল রেজিস্ট্রেশন
+// routes/referrals.js - Improved register route
 router.post("/register", async (req, res) => {
   const { userId, referrerCode, userEmail, displayName } = req.body;
   
@@ -187,43 +188,84 @@ router.post("/register", async (req, res) => {
   try {
     await session.withTransaction(async () => {
       const referrer = await usersCollection.findOne({ referralCode: referrerCode });
-      if (!referrer) throw new Error("INVALID_REFERRAL_CODE");
+      if (!referrer) {
+        throw new Error("INVALID_REFERRAL_CODE");
+      }
 
       // ইউজার নিজেকে রেফার করতে পারবে না
       if (referrer.email === userEmail) {
         throw new Error("SELF_REFERRAL_NOT_ALLOWED");
       }
 
-      // চেক করুন যদি আগে থেকেই রেফারেল exists
+      // ✅ ফিক্স: ইউজার ইতিমধ্যে রেফার্ড কি না চেক করুন
       const existingReferral = await referralsCollection.findOne({
-        referredUserId: new ObjectId(userId)
+        referredUserId: new ObjectId(userId),
+        referrerUserId: referrer._id
       });
 
       if (existingReferral) {
-        throw new Error("USER_ALREADY_REFERRED");
+        // যদি ইতিমধ্যে রেফার্ড থাকে, তাহলে সফল রিটার্ন দিন
+        return res.json({ 
+          success: true, 
+          message: "ইউজার ইতিমধ্যেই রেফার্ড হয়েছে",
+          data: { alreadyReferred: true }
+        });
       }
 
-      await referralsCollection.insertOne({
+      // ✅ ফিক্স: অন্য রেফারারের কাছ থেকে রেফার্ড আছে কি না চেক করুন
+      const referredByOther = await referralsCollection.findOne({
+        referredUserId: new ObjectId(userId),
+        referrerUserId: { $ne: referrer._id }
+      });
+
+      if (referredByOther) {
+        return res.status(409).json({
+          success: false,
+          message: "ইউজার ইতিমধ্যেই অন্য রেফারার দ্বারা রেফার্ড হয়েছে",
+          code: "ALREADY_REFERRED_BY_OTHER"
+        });
+      }
+
+      // নতুন রেফারেল তৈরি করুন
+      const referralData = {
         referrerUserId: referrer._id,
         referrerEmail: referrer.email,
         referredUserId: new ObjectId(userId),
         referredEmail: userEmail,
-        displayName: displayName,
+        displayName: displayName || "User",
         status: "pending",
         registrationDate: new Date(),
+        hasDeposited: false,
+        depositApproved: false,
         totalEarned: 0,
-        commissionHistory: []
-      }, { session });
+        commissionHistory: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
 
+      await referralsCollection.insertOne(referralData, { session });
+
+      // রেফারারের টোটাল রেফারেল কাউন্ট আপডেট করুন
       await usersCollection.updateOne(
         { _id: referrer._id }, 
-        { $inc: { totalReferrals: 1 } }, 
+        { 
+          $inc: { 
+            totalReferrals: 1,
+            pendingReferrals: 1
+          },
+          $set: { updatedAt: new Date() }
+        }, 
         { session }
       );
 
       res.json({ 
         success: true, 
-        message: "রেফারেল সফলভাবে রেজিস্টার্ড হয়েছে" 
+        message: "রেফারেল সফলভাবে রেজিস্টার্ড হয়েছে",
+        data: {
+          referralId: referralData._id,
+          referrerName: referrer.displayName || referrer.firstName || referrer.email,
+          registrationDate: referralData.registrationDate
+        }
       });
     });
   } catch (error) {
@@ -231,19 +273,24 @@ router.post("/register", async (req, res) => {
     
     let errorMessage = "রেফারেল রেজিস্ট্রেশনে সমস্যা হয়েছে";
     let statusCode = 400;
+    let errorCode = "UNKNOWN_ERROR";
 
     if (error.message === "INVALID_REFERRAL_CODE") {
       errorMessage = "ইনভ্যালিড রেফারেল কোড";
+      errorCode = "INVALID_CODE";
     } else if (error.message === "USER_ALREADY_REFERRED") {
       errorMessage = "ইউজার ইতিমধ্যেই রেফার্ড হয়েছে";
-      statusCode = 409; // Conflict status code
+      errorCode = "ALREADY_REFERRED";
+      statusCode = 200; // ✅ Conflict এর পরিবর্তে 200 দিচ্ছি
     } else if (error.message === "SELF_REFERRAL_NOT_ALLOWED") {
       errorMessage = "আপনি নিজেকে রেফার করতে পারবেন না";
+      errorCode = "SELF_REFERRAL";
     }
 
     res.status(statusCode).json({ 
-      success: false, 
-      message: errorMessage
+      success: statusCode === 200, // যদি 200 হয় তাহলে success: true
+      message: errorMessage,
+      code: errorCode
     });
   } finally { 
     await session.endSession(); 
