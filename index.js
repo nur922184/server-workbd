@@ -36,26 +36,65 @@ async function connectDB() {
     const withdrawalsCollection = db.collection("withdrawals");
     const productsCollection = db.collection("products")
     const userProductsCollection = db.collection("user_products");
+    const analyticsCollection = db.collection("analytics");
     const referralsCollection = db.collection("referrals");
 
-    // Routes
+    // ✅ IMPORTANT: Fix duplicate route issue
     const userRoutes = require('./routes/users')(usersCollection, referralsCollection);
     const paymentRoutes = require('./routes/payments')(paymentsCollection);
-    const transactionRoutes = require('./routes/transactions')(transactionsCollection, usersCollection, userProductsCollection, referralsCollection);
+    
+    // ✅ Fixed: Add withdrawalsCollection to transaction routes
+    const transactionRoutes = require('./routes/transactions')(
+        transactionsCollection, 
+        usersCollection, 
+        userProductsCollection, 
+        referralsCollection,
+        withdrawalsCollection  // Added this
+    );
+    
     const withdrawalRoutes = require('./routes/withdrawals')(withdrawalsCollection, usersCollection, paymentsCollection);
-    const productRoutes = require('./routes/products')(productsCollection, usersCollection, userProductsCollection, transactionsCollection, referralsCollection,);
+    
+    const productRoutes = require('./routes/products')(
+        productsCollection, 
+        usersCollection, 
+        userProductsCollection, 
+        transactionsCollection, 
+        referralsCollection
+    );
+    
     const dailyIncomeRoutes = require('./routes/dailyIncome')(userProductsCollection, usersCollection);
+    
+    // ✅ FIXED: Use correct path for analytics
+    const analyticsRoutes = require('./routes/analytics')(
+        usersCollection,
+        transactionsCollection, 
+        userProductsCollection,
+        referralsCollection,
+        withdrawalsCollection
+    );
+    
+    // ✅ FIXED: Pass MongoDB client as 5th argument
+    const referralRoutes = require('./routes/referrals')(
+        usersCollection, 
+        referralsCollection, 
+        productsCollection, 
+        transactionsCollection, 
+        userProductsCollection, 
+        client
+    );
 
-    // ✅ FIXED: Pass MongoDB client as 4th argument
-    const referralRoutes = require('./routes/referrals')(usersCollection, referralsCollection, productsCollection, transactionsCollection, userProductsCollection, client);
-
+    // ✅ CORRECTED: Use different paths for analytics and referrals
     app.use('/api/users', userRoutes);
     app.use('/api/payment-methods', paymentRoutes);
     app.use('/api/transactions', transactionRoutes);
     app.use('/api/withdrawals', withdrawalRoutes);
     app.use('/api/products', productRoutes);
     app.use('/api/daily-income', dailyIncomeRoutes);
-    app.use('/api/referrals', referralRoutes);
+    app.use('/api/analytics', analyticsRoutes);  // ✅ Analytics has its own path
+    app.use('/api/referrals', referralRoutes);   // ✅ Referrals has its own path
+
+    console.log("✅ All routes loaded successfully!");
+    
   } catch (error) {
     console.error("❌ MongoDB connection error:", error);
   }

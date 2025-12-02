@@ -5,61 +5,89 @@ const { ObjectId } = require('mongodb');
 
 module.exports = (withdrawalsCollection, usersCollection, paymentsCollection) => {
 
-    // ==========================
-    // Submit Withdrawal Request
-    // ==========================
-    router.post('/', async (req, res) => {
-        try {
-            const { userId, email, paymentMethodId, amount } = req.body;
 
-            if (!userId || !email || !paymentMethodId || !amount) {
-                return res.status(400).json({ success: false, message: 'সবগুলো ফিল্ড পূরণ করুন' });
-            }
+// Submit Withdrawal Request
+// ==========================
+router.post('/', async (req, res) => {
+    try {
+        const { userId, email, paymentMethodId, amount } = req.body;
 
-            const withdrawalAmount = parseFloat(amount);
-            if (withdrawalAmount <= 0 || withdrawalAmount < 200) {
-                return res.status(400).json({ success: false, message: 'ন্যূনতম ৳200 উত্তোলন করতে হবে' });
-            }
-
-            // Fetch user
-            const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
-            if (!user) return res.status(404).json({ success: false, message: 'ইউজার পাওয়া যায়নি' });
-            if (user.balance < withdrawalAmount) return res.status(400).json({ success: false, message: 'ব্যালেন্স পর্যাপ্ত নয়' });
-
-            // Fetch payment method
-            const paymentMethod = await paymentsCollection.findOne({ _id: new ObjectId(paymentMethodId) });
-            if (!paymentMethod) return res.status(404).json({ success: false, message: 'পেমেন্ট মেথড পাওয়া যায়নি' });
-
-            // Deduct balance immediately
-            const newBalance = user.balance - withdrawalAmount;
-            await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: { balance: newBalance } });
-
-            // Create withdrawal record
-            const withdrawalData = {
-                userId: new ObjectId(userId),
-                userEmail: email,
-                userName: user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User',
-                paymentMethod: paymentMethod.paymentMethod,
-                paymentNumber: paymentMethod.phoneNumber,
-                paymentMethodId: new ObjectId(paymentMethodId),
-                amount: withdrawalAmount,
-                previousBalance: user.balance,
-                newBalance,
-                status: 'pending',
-                createdAt: new Date(),
-                approvedAt: null,
-                approvedBy: null
-            };
-
-            const result = await withdrawalsCollection.insertOne(withdrawalData);
-
-            res.json({ success: true, message: 'Withdrawal রিকোয়েস্ট সাবমিট হয়েছে!', data: { _id: result.insertedId, ...withdrawalData } });
-
-        } catch (error) {
-            console.error('Withdrawal submission error:', error);
-            res.status(500).json({ success: false, message: 'এরর হয়েছে!' });
+        if (!userId || !email || !paymentMethodId || !amount) {
+            return res.status(400).json({ success: false, message: 'সবগুলো ফিল্ড পূরণ করুন' });
         }
-    });
+
+        const withdrawalAmount = parseFloat(amount);
+        if (withdrawalAmount <= 0 || withdrawalAmount < 200) {
+            return res.status(400).json({ success: false, message: 'ন্যূনতম ৳200 উত্তোলন করতে হবে' });
+        }
+
+        // Fetch user
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        if (!user) return res.status(404).json({ success: false, message: 'ইউজার পাওয়া যায়নি' });
+        
+        // Check balance
+        if (user.balance < withdrawalAmount) {
+            return res.status(400).json({ success: false, message: 'ব্যালেন্স পর্যাপ্ত নয়' });
+        }
+
+        // 5% charge calculation
+        const fivePercentCharge = withdrawalAmount * 0.05; // 5% of withdrawal amount
+        const totalDeduction = withdrawalAmount + fivePercentCharge; // Actual amount to deduct
+        
+        // Check if user has enough balance for withdrawal + 5%
+        if (user.balance < totalDeduction) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `ব্যালেন্স পর্যাপ্ত নয়। উত্তোলন: ৳${withdrawalAmount} + ৫% চার্জ: ৳${fivePercentCharge.toFixed(2)} = মোট ৳${totalDeduction.toFixed(2)} প্রয়োজন` 
+            });
+        }
+
+        // Fetch payment method
+        const paymentMethod = await paymentsCollection.findOne({ _id: new ObjectId(paymentMethodId) });
+        if (!paymentMethod) return res.status(404).json({ success: false, message: 'পেমেন্ট মেথড পাওয়া যায়নি' });
+
+        // Deduct balance (withdrawal amount + 5% charge)
+        const newBalance = user.balance - totalDeduction;
+        await usersCollection.updateOne(
+            { _id: new ObjectId(userId) }, 
+            { 
+                $set: { balance: newBalance },
+                $inc: { total5PercentCharged: fivePercentCharge } // Optional: track total 5% charges
+            }
+        );
+
+        // Create withdrawal record
+        const withdrawalData = {
+            userId: new ObjectId(userId),
+            userEmail: email,
+            userName: user.displayName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User',
+            paymentMethod: paymentMethod.paymentMethod,
+            paymentNumber: paymentMethod.phoneNumber,
+            paymentMethodId: new ObjectId(paymentMethodId),
+            amount: withdrawalAmount,
+            fivePercentCharge: fivePercentCharge,
+            totalDeduction: totalDeduction,
+            previousBalance: user.balance,
+            newBalance,
+            status: 'pending',
+            createdAt: new Date(),
+            approvedAt: null,
+            approvedBy: null
+        };
+
+        const result = await withdrawalsCollection.insertOne(withdrawalData);
+
+        res.json({ 
+            success: true, 
+            message: 'Withdrawal রিকোয়েস্ট সাবমিট হয়েছে! ৫% চার্জ কেটে নেওয়া হয়েছে।', 
+            data: { _id: result.insertedId, ...withdrawalData } 
+        });
+
+    } catch (error) {
+        console.error('Withdrawal submission error:', error);
+        res.status(500).json({ success: false, message: 'এরর হয়েছে!' });
+    }
+});
 
     // ==========================
     // Update Withdrawal Status (Admin)
