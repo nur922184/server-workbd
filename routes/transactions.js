@@ -292,16 +292,22 @@ module.exports = (transactionsCollection, usersCollection, userProductsCollectio
     });
 
     /** ✅ GET /user/:userId → নির্দিষ্ট ইউজারের সব ট্রানজেকশন */
-    router.get('/user/:userId', async (req, res) => {
-        try {
-            const { userId } = req.params;
-            const data = await transactionsCollection.find({ userId }).sort({ date: -1 }).toArray();
-            res.json({ success: true, data });
-        } catch (error) {
-            console.error('Get user transactions error:', error);
-            res.status(500).json({ success: false, message: 'লোড করতে সমস্যা হয়েছে' });
-        }
-    });
+  router.get('/user/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const data = await transactionsCollection.find({
+            userId: new ObjectId(userId)
+        })
+        .sort({ date: -1 })
+        .toArray();
+
+        res.json({ success: true, data });
+    } catch (error) {
+        console.error('Get user transactions error:', error);
+        res.status(500).json({ success: false, message: 'লোড করতে সমস্যা হয়েছে' });
+    }
+});
 
     /** ✅ GET /all → সব ট্রানজেকশন (এডমিন) */
     router.get('/all', async (req, res) => {
